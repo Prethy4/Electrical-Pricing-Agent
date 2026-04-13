@@ -6,7 +6,7 @@ Keeps the N most-recent messages in context to stay within token limits.
 from typing import List
 from uuid import UUID
 
-from langchain.schema import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories import MessageRepository
