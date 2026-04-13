@@ -9,8 +9,7 @@ To add a new tool:
 The agent graph will automatically pick up all registered tools.
 """
 
-from langchain_core.tools import tool
-from langchain.tools.retriever import create_retriever_tool
+from langchain_core.tools import create_retriever_tool, tool
 
 # ── Built-in tools ─────────────────────────────────────────────────────────────
 
