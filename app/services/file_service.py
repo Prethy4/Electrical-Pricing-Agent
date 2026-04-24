@@ -10,15 +10,25 @@ import io
 import os
 import logging
 from pathlib import Path
+import pandas as pd
 from typing import List, Tuple
 from uuid import UUID
-
-import pandas as pd
+from app.services.csv_schema_inference import infer_csv_schema
+from app.services.context_builder import build_context_tree
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 
+try:
+    from pdf2image import convert_from_path
+    import pytesseract
+except ImportError:
+    convert_from_path = None
+    pytesseract = None
+
+from app.pdf_structured import process_pdf_structured
+from app.services.pdf_mapper import extract_pdf_articles
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -26,6 +36,8 @@ settings = get_settings()
 
 # In-memory store: session_id (str) → FAISS index
 _vector_stores: dict[str, FAISS] = {}
+# In-memory store: session_id (str) → {article_code: data}
+_article_stores: dict[str, dict] = {}
 
 embeddings = OpenAIEmbeddings(
     model=settings.openai_embedding_model,
@@ -46,24 +58,68 @@ async def process_pdf(
     file_path: str,
     filename: str,
 ) -> int:
-    """Parse a PDF, embed chunks, store in the session vector store. Returns chunk count."""
-    from pypdf import PdfReader
+    """Parse a PDF using layout-aware tools, embed chunks, and store in the session vector store."""
+    logger.info(f"PRODUCT_EXTRACTION_START | Session: {session_id} | File: {filename}")
+    
+    # Use the structured parser for high-fidelity extraction
+    structured_chunks = await process_pdf_structured(file_path)
+    
+    # Combine text for fallback/chunking check or use directly as Documents
+    full_text = "\n\n".join([c["content"] for c in structured_chunks if c["content"]])
 
-    reader = PdfReader(file_path)
-    pages_text = [
-        page.extract_text() or ""
-        for page in reader.pages
-    ]
-    full_text = "\n\n".join(pages_text)
+    # OCR Fallback: If pypdf yielded no text, it's likely a scanned image
+    if not full_text.strip() or len(full_text.strip()) < 50:
+        logger.info(f"Attempting OCR for scanned PDF: {filename}")
+        if convert_from_path and pytesseract:
+            try:
+                # Convert PDF pages to images
+                images = convert_from_path(file_path)
+                ocr_text = []
+                for img in images:
+                    # Extract text using Tesseract (using French/English)
+                    text = pytesseract.image_to_string(img, lang='fra+eng')
+                    ocr_text.append(text)
+                full_text = "\n\n".join(ocr_text)
+                
+                # FIX: Create a structured chunk from OCR text so it gets indexed
+                if full_text.strip():
+                    structured_chunks = [{
+                        "content": full_text,
+                        "type": "section",
+                        "metadata": {"source": filename, "method": "ocr"}
+                    }]
+            except Exception as e:
+                logger.error(f"OCR failed for {filename}: {e}")
+        else:
+            logger.warning("OCR libraries (pytesseract/pdf2image) missing. Cannot process scanned PDF.")
 
     if not full_text.strip():
-        logger.warning(f"PDF {filename} yielded no extractable text.")
+        logger.warning(f"PDF_RESULT | No text extracted for {filename}")
         return 0
 
-    docs = text_splitter.create_documents(
-        [full_text],
-        metadatas=[{"source": filename, "type": "pdf", "session_id": str(session_id)}],
-    )
+    # Re-build article-based index after potential OCR
+    article_map = extract_pdf_articles(structured_chunks)
+    _upsert_articles(str(session_id), article_map)
+
+    # Create documents from structured chunks to preserve metadata
+    docs = []
+    for chunk in structured_chunks:
+        if not chunk["content"]:
+            continue
+        
+        # Ensure each chunk is within token limits for embedding
+        sub_chunks = text_splitter.split_text(chunk["content"])
+        for text in sub_chunks:
+            docs.append(Document(
+                page_content=text,
+                metadata={
+                    **chunk["metadata"],
+                    "element_type": chunk["type"],
+                    "session_id": str(session_id)
+                }
+            ))
+
+    logger.info(f"PDF_RESULT | Created {len(docs)} structured chunks for {filename}")
     return _upsert_docs(str(session_id), docs)
 
 
@@ -72,26 +128,41 @@ async def process_csv(
     file_path: str,
     filename: str,
 ) -> int:
-    """Parse a CSV, embed row summaries, store in the session vector store. Returns chunk count."""
-    df = pd.read_csv(file_path)
-    df = df.fillna("")
+    """Hierarchical CSV Ingestion: Reconstructs context tree before indexing."""
+    logger.info(f"CSV_HIERARCHICAL_INGESTION_START | File: {filename}")
+    try:
+        df = pd.read_csv(file_path, encoding='latin-1', sep=None, engine='python')
+    except Exception as e:
+        logger.error(f"CSV_INDEXING_ERROR | {filename}: {e}")
+        return 0
 
-    # Build a text summary per row; also include a global schema overview
+    df_ingest = df.copy().fillna("")
+
+    # 1. Infer Schema (Detect French Synonyms)
+    headers = df_ingest.columns.tolist()
+    sample = df_ingest.head(3).to_dict(orient="records")
+    schema_info = await infer_csv_schema(headers, sample)
+    mapping = schema_info.get("mapping", {})
+
+    # Hierarchical Reconstruction
+    raw_rows = df_ingest.to_dict(orient="records")
+    hierarchical_rows = build_context_tree(raw_rows, mapping=mapping)
+
     schema_doc = Document(
         page_content=(
             f"CSV file: {filename}\n"
-            f"Columns: {', '.join(df.columns.tolist())}\n"
-            f"Row count: {len(df)}\n"
-            f"Sample (first 5 rows):\n{df.head(5).to_string(index=False)}"
+            f"Row count: {len(df_ingest)}\n"
+            f"Raw Columns: {', '.join(df.columns.tolist())}"
         ),
         metadata={"source": filename, "type": "csv_schema", "session_id": str(session_id)},
     )
 
-    # Convert each row to a short human-readable string
-    row_texts = df.apply(
-        lambda row: ", ".join(f"{col}: {val}" for col, val in row.items() if val != ""),
-        axis=1,
-    ).tolist()
+    row_texts = []
+    for hr in hierarchical_rows:
+        ctx = " > ".join(hr.get("_context", []))
+        art = hr.get("_article_code", "No Code")
+        raw_data = ", ".join([f"{k}: {v}" for k, v in hr.items() if not k.startswith('_')])
+        row_texts.append(f"ARTICLE: {art}\nCONTEXT: {ctx}\nDATA: {raw_data}")
 
     # Batch rows into chunks to avoid too many tiny docs
     batch_size = 50
@@ -123,6 +194,11 @@ def get_retriever(session_id: UUID, k: int = 4):
     return store.as_retriever(search_kwargs={"k": k})
 
 
+def get_article_data(session_id: UUID, article_code: str):
+    """Deterministic lookup for specific article data."""
+    return _article_stores.get(str(session_id), {}).get(article_code)
+
+
 def has_documents(session_id: UUID) -> bool:
     return str(session_id) in _vector_stores
 
@@ -138,3 +214,8 @@ def _upsert_docs(session_key: str, docs: List[Document]) -> int:
     else:
         existing.add_documents(docs)
     return len(docs)
+
+def _upsert_articles(session_key: str, article_map: dict):
+    if session_key not in _article_stores:
+        _article_stores[session_key] = {}
+    _article_stores[session_key].update(article_map)

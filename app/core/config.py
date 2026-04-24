@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # File Upload
     max_file_size_mb: int = 20
     upload_dir: str = "uploads"
+    
+    # RAG Settings
+    chunk_size: int = 1000
+    chunk_overlap: int = 100
 
     class Config:
         env_file = ".env"

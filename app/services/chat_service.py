@@ -32,10 +32,14 @@ class ChatService:
         first_message: str,
     ) -> Session:
         if session_id:
-            session = await self.session_repo.get(session_id)
-            if not session:
-                raise ValueError(f"Session {session_id} not found.")
-            return session
+            try:
+                uid = UUID(str(session_id))
+                session = await self.session_repo.get(uid)
+                if session:
+                    return session
+            except (ValueError, AttributeError):
+                pass
+
         # Auto-title the session from the first message
         title = first_message[:60] + ("…" if len(first_message) > 60 else "")
         return await self.session_repo.create(title=title)
@@ -62,6 +66,7 @@ class ChatService:
             user_message=user_message,
             history=history,
             retriever=retriever,
+            session_id=sid,
         )
 
         # Persist messages

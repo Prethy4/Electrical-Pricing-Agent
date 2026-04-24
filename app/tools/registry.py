@@ -10,6 +10,11 @@ The agent graph will automatically pick up all registered tools.
 """
 
 from langchain_core.tools import create_retriever_tool, tool
+from app.tools.web_scraper import scrape_knowledge_base, tavily_search
+from app.tools.csv_tool import manage_csv_data, list_session_files
+from app.tools.example_tool import summarize_numbers
+from app.services.file_service import get_article_data, _article_stores
+from uuid import UUID
 
 # ── Built-in tools ─────────────────────────────────────────────────────────────
 
@@ -31,6 +36,33 @@ def get_current_datetime(dummy: str = "") -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
 
+@tool
+def lookup_article_data(session_id: str, article_code: str) -> str:
+    """
+    Perform a deterministic lookup of a specific article code in the uploaded PDFs.
+    Returns text and table data associated specifically with that code.
+    """
+    data = get_article_data(UUID(session_id), article_code)
+    if not data:
+        return f"Code article '{article_code}' non trouvé dans l'index déterministe."
+    
+    output = [f"--- DONNÉES POUR L'ARTICLE {article_code} ---"]
+    if data.get("context"):
+        output.append(f"CONTEXTE : {' '.join(data['context'])}")
+    output.append("CONTENU :")
+    output.extend(data.get("data_fragments", []))
+    return "\n".join(output)
+
+@tool
+def list_all_pdf_articles(session_id: str) -> str:
+    """
+    Returns a list of all unique article codes discovered across all uploaded PDFs.
+    Use this to see what articles exist in the documentation that might be missing from the CSV.
+    """
+    store = _article_stores.get(session_id, {})
+    if not store:
+        return "No articles found in the PDF index."
+    return "Articles discovered in PDFs: " + ", ".join(sorted(store.keys()))
 
 # ── Add your custom tools below ───────────────────────────────────────────────
 # Example:
@@ -48,7 +80,13 @@ def get_current_datetime(dummy: str = "") -> str:
 REGISTERED_TOOLS = [
     calculator,
     get_current_datetime,
-    # add more tools here
+    scrape_knowledge_base,
+    tavily_search,
+    manage_csv_data,
+    list_session_files,
+    summarize_numbers,
+    lookup_article_data,
+    list_all_pdf_articles
 ]
 
 

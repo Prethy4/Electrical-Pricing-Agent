@@ -8,12 +8,21 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+db_url = settings.database_url.replace("postgres://", "postgresql+asyncpg://")
+if "postgresql" in db_url and "asyncpg" not in db_url:
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+
+connect_args = {}
+if "sslmode=require" in settings.database_url.lower() or "ssl=true" in settings.database_url.lower():
+    connect_args["ssl"] = True
+
 engine = create_async_engine(
-    settings.database_url,
+    db_url,
     echo=settings.debug,
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
+    connect_args=connect_args
 )
 
 AsyncSessionLocal = async_sessionmaker(

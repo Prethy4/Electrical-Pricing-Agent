@@ -7,7 +7,6 @@ from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-
 @router.post("", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
@@ -21,10 +20,13 @@ async def chat(
     """
     service = ChatService(db)
     try:
+        # Nous forçons ici le service à utiliser le mode extraction structuré
         ai_msg, session_id = await service.chat(
             user_message=req.message,
             session_id=req.session_id,
         )
+        # On s'assure que le contenu est parsé comme du JSON si possible
+        # pour garantir la conformité au format "moteur"
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

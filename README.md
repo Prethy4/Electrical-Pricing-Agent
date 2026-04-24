@@ -127,7 +127,8 @@ POST /api/v1/files/upload
 Content-Type: multipart/form-data
 
 session_id=<uuid>
-file=<pdf or csv file>
+files=<pdf or csv file>
+files=<another pdf or csv file>
 ```
 
 Supported formats: `.pdf`, `.csv`  
