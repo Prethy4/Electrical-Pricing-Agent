@@ -25,10 +25,11 @@ pytesseract
 pdf2image
 faiss-cpu>=1.8.0
 tiktoken>=0.7.0
-unstructured
+unstructured[pdf]
 pymupdf
 pypdf
 pdfminer.six
+openpyxl
 
 # Utilities
 pydantic>=2.9.0
