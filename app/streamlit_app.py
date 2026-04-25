@@ -167,8 +167,8 @@ with attach_col:
         with st.popover("Charger 🔗"):
             st.markdown("### Joindre des documents")
             uploaded_files = st.file_uploader(
-                "Télécharger PDF ou CSV",
-                type=["pdf", "csv"],
+                "Télécharger PDF, CSV ou Excel",
+                type=["pdf", "csv", "xlsx"],
                 accept_multiple_files=True,
                 label_visibility="collapsed"
             )
@@ -192,7 +192,7 @@ with attach_col:
                     st.error(f"Error: {e}")
 
 # ===== CHAT INPUT =====
-if prompt := st.chat_input("Ex: 'Remplir les valeurs manquantes dans mon CSV'"):
+if prompt := st.chat_input("Ex: 'Remplir les valeurs manquantes dans mon Excel'"):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
