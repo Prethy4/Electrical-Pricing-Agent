@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.tools.csv_tool import list_session_files
 from app.db.database import get_db
 from app.db.repositories import FileRepository
-from app.services.file_service import process_pdf, process_csv
+from app.services.file_service import process_pdf, process_csv, process_xlsx
 
 router = APIRouter()
 settings = get_settings()
@@ -17,7 +17,7 @@ settings = get_settings()
 @router.post("/upload/{session_id}")
 async def upload_files(
     session_id: UUID, 
-    files: Annotated[List[UploadFile], File(description="Select multiple PDF and CSV files")],
+    files: Annotated[List[UploadFile], File(description="Select multiple PDF, CSV or Excel files")],
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -45,12 +45,14 @@ async def upload_files(
                 chunk_count = await process_pdf(session_id, str(file_path), file.filename)
             elif file.filename.lower().endswith(".csv"):
                 chunk_count = await process_csv(session_id, str(file_path), file.filename)
+            elif file.filename.lower().endswith(".xlsx"):
+                chunk_count = await process_xlsx(session_id, str(file_path), file.filename)
 
             # Save to Database
             db_file = await file_repo.create(
                 session_id=session_id,
                 filename=file.filename,
-                file_type="pdf" if file.filename.lower().endswith(".pdf") else "csv",
+                file_type=file.filename.split('.')[-1].lower(),
                 file_path=str(file_path),
                 file_size=file_path.stat().st_size
             )
