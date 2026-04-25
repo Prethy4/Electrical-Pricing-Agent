@@ -19,7 +19,7 @@ async def infer_csv_schema(headers: List[str], sample_rows: List[Dict[str, Any]]
     logger.info(f"CSV SCHEMA INFERENCE | RAW HEADERS: {headers}")
 
     prompt = f"""
-    Tu es un architecte de données spécialisé dans les bordereaux de prix techniques français. Ta tâche est de mapper les en-têtes CSV bruts à un schéma canonique.
+    You are a data architect specializing in French technical quantity surveys. Your task is to map raw CSV headers to a canonical schema.
     
     Canonical Fields:
     - article_code (Ex: Article, Code, N°, Référence)
