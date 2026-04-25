@@ -130,8 +130,20 @@ async def process_csv(
 ) -> int:
     """Hierarchical CSV Ingestion: Reconstructs context tree before indexing."""
     logger.info(f"CSV_HIERARCHICAL_INGESTION_START | File: {filename}")
+    
+    # Robust encoding detection matching the tool logic
+    encoding = 'utf-8'
+    for enc in ['utf-8-sig', 'utf-8', 'cp1252', 'latin-1']:
+        try:
+            pd.read_csv(file_path, encoding=enc, nrows=5)
+            encoding = enc
+            break
+        except Exception:
+            continue
+            
     try:
-        df = pd.read_csv(file_path, encoding='latin-1', sep=None, engine='python')
+        # Use engine='python' and sep=None for automatic delimiter detection
+        df = pd.read_csv(file_path, encoding=encoding, sep=None, engine='python')
     except Exception as e:
         logger.error(f"CSV_INDEXING_ERROR | {filename}: {e}")
         return 0
@@ -175,6 +187,81 @@ async def process_csv(
                 metadata={
                     "source": filename,
                     "type": "csv_rows",
+                    "row_start": i,
+                    "row_end": i + len(batch),
+                    "session_id": str(session_id),
+                },
+            )
+        )
+
+    all_docs = [schema_doc] + row_docs
+    return _upsert_docs(str(session_id), all_docs)
+
+async def process_xlsx(
+    session_id: UUID,
+    file_path: str,
+    filename: str,
+) -> int:
+    """Hierarchical Excel Ingestion: Similar to CSV but using pandas read_excel."""
+    logger.info(f"EXCEL_HIERARCHICAL_INGESTION_START | File: {filename}")
+    try:
+        # Match header detection logic from csv_tool
+        header_check = pd.read_excel(file_path, nrows=20, header=None, engine='openpyxl')
+        header_idx = 0
+        for i, row in header_check.iterrows():
+            row_vals = [str(v).strip().lower() for v in row.values if v is not None]
+            if any(k in row_vals for k in ["article", "art.", "code", "réf"]) and \
+               any(k in " ".join(row_vals) for k in ["dénomination", "désignation", "unité", "qté", "quantité", "p.u", "somme"]):
+                header_idx = i
+                break
+        
+        df = pd.read_excel(file_path, engine='openpyxl', header=header_idx)
+    except ImportError:
+        logger.error(f"EXCEL_INDEXING_ERROR | {filename}: The 'openpyxl' library is required to process Excel files.")
+        return 0
+    except Exception as e:
+        logger.error(f"EXCEL_INDEXING_ERROR | {filename}: {e}")
+        return 0
+
+    df_ingest = df.copy().fillna("")
+
+    # 1. Infer Schema
+    headers = df_ingest.columns.astype(str).tolist()
+    sample = df_ingest.head(3).to_dict(orient="records")
+    schema_info = await infer_csv_schema(headers, sample)
+    mapping = schema_info.get("mapping", {})
+
+    # Hierarchical Reconstruction
+    raw_rows = df_ingest.to_dict(orient="records")
+    hierarchical_rows = build_context_tree(raw_rows, mapping=mapping)
+
+    schema_doc = Document(
+        page_content=(
+            f"Excel file: {filename}\n"
+            f"Row count: {len(df_ingest)}\n"
+            f"Columns: {', '.join(headers)}"
+        ),
+        metadata={"source": filename, "type": "excel_schema", "session_id": str(session_id)},
+    )
+
+    row_texts = []
+    for hr in hierarchical_rows:
+        ctx = " > ".join(hr.get("_context", []))
+        art = hr.get("_article_code", "No Code")
+        raw_data = ", ".join([f"{k}: {v}" for k, v in hr.items() if not k.startswith('_')])
+        row_texts.append(f"ARTICLE: {art}\nCONTEXT: {ctx}\nDATA: {raw_data}")
+
+    # Batch rows into chunks
+    batch_size = 50
+    row_docs = []
+    for i in range(0, len(row_texts), batch_size):
+        batch = row_texts[i : i + batch_size]
+        row_docs.append(
+            Document(
+                page_content="\n".join(batch),
+                metadata={
+                    "source": filename,
+                    "type": "excel_rows",
                     "row_start": i,
                     "row_end": i + len(batch),
                     "session_id": str(session_id),
