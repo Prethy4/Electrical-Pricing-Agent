@@ -48,7 +48,7 @@ async def infer_csv_schema(headers: List[str], sample_rows: List[Dict[str, Any]]
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o",  # Using a robust model for schema inference
+            model="gpt-4o-mini",  # Faster model for mapping tasks
             messages=[{"role": "system", "content": "You are a specialized data mapping assistant."},
                       {"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
