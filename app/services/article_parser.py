@@ -1,24 +1,35 @@
 import re
 from typing import Optional
 
+def normalize_article_code(code: str) -> str:
+    """
+    Uniformise le code article : supprime les zéros non significatifs 
+    et remplace les tirets par des points.
+    Ex: '01.02-03.04' -> '1.2.3.4'
+    """
+    if not code:
+        return ""
+    # Sépare par point ou tiret
+    segments = re.split(r'[\.\-]', code)
+    # Supprime les zéros de tête de chaque segment (ex: 01 -> 1)
+    norm_segs = [s.lstrip('0') if s.lstrip('0') else "0" for s in segments]
+    return ".".join(norm_segs)
+
 def extract_article_code(text: str) -> Optional[str]:
     """
-    Extracts article codes like 72.22.1b.01 from text.
-    Pattern: digits separated by dots, potentially containing a single letter.
+    Extracts article codes with 1 to 4 segments (e.g., 0, 1.1, 1.1.1, 1.1.1.1).
     """
-    # Matches patterns like 72.22.1, 72.22.1b, 72.22.1b.01 and allows internal spaces (72.22.01. 01)
-    pattern = r'(\d+(?:\s*\.\s*\d+)*(?:\s*[a-zA-Z])?(?:\s*\.\s*\d+)*)'
+    # Capture 1 à 4 segments séparés par . ou - en évitant les sous-séquences de codes plus longs
+    pattern = r'(?<![\d\.])(?:\b|^)(\d+[a-zA-Z]?(?:[\.\-]\d+[a-zA-Z]?){0,3})(?!(?:[\.\-]\d)|[\d])'
     match = re.search(pattern, text)
-    return match.group(1) if match else None
+    if match:
+        raw_code = match.group(1).replace(" ", "").strip('.')
+        return normalize_article_code(raw_code)
+    return None
 
 def get_hierarchy_level(code: str) -> int:
     """
-    Determines the depth of the article code in the hierarchy.
-    Example: 
-    72.22.1 -> level 2
-    72.22.1b -> level 3
-    72.22.1b.01 -> level 4
+    Détermine la profondeur basée sur les segments (points ou tirets).
     """
-    dot_count = code.count('.')
-    alpha_count = len([c for c in code if c.isalpha()])
-    return dot_count + alpha_count
+    if not code: return 0
+    return len(re.split(r'[\.\-]', code))
