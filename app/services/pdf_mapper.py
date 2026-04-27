@@ -1,6 +1,6 @@
 import logging
 from typing import List, Dict, Any
-from app.services.article_parser import extract_article_code
+from app.services.article_parser import extract_article_code, normalize_article_code
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def extract_pdf_articles(structured_blocks: List[Dict[str, Any]]) -> Dict[str, D
                 continue
                 
             code = extract_article_code(content)
-            target_code = code or last_seen_code
+            target_code = code or last_seen_code # Normalisé par extract_article_code
             
             if not target_code:
                 buffer_text.append(content)
