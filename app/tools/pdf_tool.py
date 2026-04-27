@@ -1,5 +1,7 @@
 import os
+import json
 from pathlib import Path
+import asyncio
 from typing import Dict, Any, List
 try:
     import pypdf
@@ -19,7 +21,7 @@ from app.db.vector_store import VectorStoreManager
 
 settings = get_settings()
 
-def manage_pdf_data(session_id: str, filename: str) -> Dict[str, Any]:
+async def manage_pdf_data(session_id: str, filename: str) -> str:
     """
     Extracts text via OCR/Direct, chunks it for the Knowledge Base, 
     and returns metadata.
@@ -42,12 +44,12 @@ def manage_pdf_data(session_id: str, filename: str) -> Dict[str, Any]:
         # 1. Prioritize OCR (pytesseract) as requested
         if convert_from_path and pytesseract:
             try:
-                # Convert all pages to images for OCR
-                images = convert_from_path(str(file_path))
+                # Offload CPU-bound image conversion
+                images = await asyncio.to_thread(convert_from_path, str(file_path))
                 if images:
                     ocr_pages = []
                     for img in images:
-                        ocr_pages.append(pytesseract.image_to_string(img, lang='fra').strip())
+                        ocr_pages.append(await asyncio.to_thread(pytesseract.image_to_string, img, lang='fra'))
                     extracted_text = "\n".join(ocr_pages).strip()
                     method = "ocr_tesseract"
             except Exception as ocr_err:
@@ -55,11 +57,11 @@ def manage_pdf_data(session_id: str, filename: str) -> Dict[str, Any]:
 
         # 2. Fallback to standard extraction if OCR is unavailable or yielded no text
         if not extracted_text:
-            text_list = [p.extract_text() or "" for p in reader.pages]
+            text_list = await asyncio.to_thread(lambda: [p.extract_text() or "" for p in reader.pages])
             extracted_text = "\n".join(text_list).strip()
             method = "pypdf"
 
-        # Clean up excessive whitespace and limit to a larger context window (e.g., 10,000 chars)
+        # Clean up excessive f8fafcspace and limit to a larger context window (e.g., 10,000 chars)
         # 3. Chunking for Knowledge Base
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.chunk_size,
@@ -71,12 +73,13 @@ def manage_pdf_data(session_id: str, filename: str) -> Dict[str, Any]:
         vs_manager = VectorStoreManager(session_id)
         vs_manager.add_documents(chunks, {"filename": filename, "type": "pdf"})
 
-        return {
+        res = {
             "filename": filename,
             "total_pages": num_pages,
             "chunk_count": len(chunks), 
             "extraction_method": method,
             "status": "success" if chunks else "failed"
         }
+        return json.dumps(res, ensure_ascii=False)
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
