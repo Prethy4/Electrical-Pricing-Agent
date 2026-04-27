@@ -9,16 +9,27 @@ st.markdown("""
 
 /* ===== Base ===== */
 html, body, .stApp {
-    background: #515151;
-    color: #f5f5f5;   /* FIX: readable on dark bg */
+    background: #0f172a;
+    color: #e2e8f0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ===== Footer / Bottom strip ===== */
+[data-testid="stBottom"],
+[data-testid="stBottom"] > div,
+[data-testid="stBottomBlockContainer"],
+.stBottom,
+div[class*="bottom"],
+div[style*="position: fixed"][style*="bottom"] {
+    background: transparent !important;
+    background-color: transparent !important;
 }
 
 /* ===== Main Container ===== */
 .block-container {
     max-width: 900px;
     margin: auto;
-    padding-bottom: 120px;
+    padding-bottom: 150px;
 }
 
 /* ===== Chat Messages ===== */
@@ -26,62 +37,54 @@ html, body, .stApp {
     margin: 12px 0;
     padding: 14px 18px;
     border-radius: 14px;
-    background: #000000;
-    border: 1px solid #444;
-    color: #f5f5f5;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    word-wrap: break-word; /* Ensure long words break */
 }
 
 [data-testid="stChatMessage"][data-testid*="user"] {
-    background: #e8f0fe;
-    color: #111;
+    background: #1d4ed8;
+    color: #0b132b;
 }
 
-/* ===== Chat Input (FIXED) ===== */
-.stChatInput {
-    position: center;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 100%;
-    max-width: 800px;
-    background: #2f2f2f;   
-    border: 1px solid #666;
-    border-radius: 24px;
-    padding: 8px 12px;
-    z-index: 999;
+/* Adjust chat input width to make space for the upload button */
+[data-testid="stChatInputContainer"] {
+    margin-left: 100px !important;
 }
 
 /* Input text visibility */
 .stChatInput textarea {
-    background: transparent !important;
-    color: #ffffff !important;   /* FIX: readable typing */
-    caret-color: #ffffff !important;
-    border: none !important;
-    outline: none !important;
+    color: #f8fafc !important;
 }
 
-/* Placeholder */
-.stChatInput textarea::placeholder {
-    color: #cfcfcf !important;
+/* Custom fixed container for the upload button */
+.fixed-upload-button {
+    position: fixed;
+    bottom: 45px;
+    left: calc(50% - 450px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
 }
 
 /* ===== Buttons ===== */
 .stButton > button {
-    background: #515151;
-    color: white;
+    background: #0f172a;
+    color: f8fafc;
     border-radius: 8px;
     border: none;
 }
 
 /* ===== Sidebar ===== */
 [data-testid="stSidebar"] {
-    background: #111111;
-    border-right: 1px solid #333;
-    color: #f5f5f5;
+    background: #020617;
+    border-right: 1px solid #1e3a8a;
+    color: #e2e8f0;
 }
 
 [data-testid="stSidebar"] * {
-    color: #f5f5f5 !important;
+    color: #e2e8f0 !important;
 }
 
 </style>
@@ -141,11 +144,11 @@ st.markdown('<div class="chat-wrapper">', unsafe_allow_html=True)
 if not st.session_state.session_id:
     st.markdown("""
     <div style="
-        background:#e8f0fe;
+        background:#1e293b;
         padding:16px;
         border-radius:12px;
         text-align:center;
-        color:#1a73e8;
+        color:#e2e8f0;
         font-weight:500;
     ">
     Commencez un nouveau chat pour débuter.
@@ -153,43 +156,19 @@ if not st.session_state.session_id:
     """, unsafe_allow_html=True)
 else:
     for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        with st.chat_message(message["role"]): # type: ignore
+            st.markdown(message["content"]) # type: ignore
 
-st.markdown('</div>', unsafe_allow_html=True)
-# ===== CHAT WRAPPER END =====
-
-# ===== INPUT + FILE ATTACH =====
-input_col, attach_col = st.columns([0.8, 0.2])
-
-with attach_col:
-    if st.session_state.session_id:
-        with st.popover("Charger 🔗"):
-            st.markdown("### Joindre des documents")
-            uploaded_files = st.file_uploader(
-                "Télécharger PDF, CSV ou Excel",
-                type=["pdf", "csv", "xlsx"],
-                accept_multiple_files=True,
-                label_visibility="collapsed"
-            )
-
-            if uploaded_files and st.button("Traiter les fichiers"):
-                files_to_send = [
-                    ("files", (f.name, f.getvalue(), f.type))
-                    for f in uploaded_files
-                ]
-                try:
-                    with st.spinner("Traitement en cours..."):
-                        response = requests.post(
-                            f"{API_BASE_URL}/upload/{st.session_state.session_id}",
-                            files=files_to_send
-                        )
-                    if response.status_code == 200:
-                        st.success(f"{len(uploaded_files)} fichiers joints.")
-                    else:
-                        st.error("Erreur de téléchargement.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+    # Display Download Buttons at the bottom if results are ready
+    list_resp = requests.get(f"{API_BASE_URL}/list/{st.session_state.session_id}")
+    if list_resp.status_code == 200:
+        updated_files = sorted(list(set(f for f in list_resp.json().get("files", []) if f.startswith('updated_'))))
+        if updated_files:
+            with st.expander("Télécharger les fichiers mis à jour", expanded=True):
+                for f in updated_files:
+                    download_url = f"{API_BASE_URL}/download/{st.session_state.session_id}/{f}"
+                    file_content = requests.get(download_url).content
+                    st.download_button(f"Enregistrer {f}", data=file_content, file_name=f, key=f"dl_main_{f}")
 
 # ===== CHAT INPUT =====
 if prompt := st.chat_input("Ex: 'Remplir les valeurs manquantes dans mon Excel'"):
@@ -226,28 +205,21 @@ if prompt := st.chat_input("Ex: 'Remplir les valeurs manquantes dans mon Excel'"
 
         except Exception as e:
             st.error(f"Erreur de communication: {e}")
-
-# ===== RESULTS =====
 if st.session_state.session_id:
-    list_resp = requests.get(f"{API_BASE_URL}/list/{st.session_state.session_id}")
-
-    if list_resp.status_code == 200:
-        all_files = list_resp.json().get("files", [])
-        # Filter for updated files and remove UI duplicates using a set
-        updated_files = sorted(list(set(f for f in all_files if f.startswith('updated_'))))
-
-        if updated_files:
-            st.divider()
-            st.write("### Résultats mis à jour")
-
-            for f in updated_files:
-                c1, c2 = st.columns([0.8, 0.2])
-                c1.success(f"{f}")
-
-                download_url = f"{API_BASE_URL}/download/{st.session_state.session_id}/{f}"
-
-                try:
-                    file_content = requests.get(download_url).content
-                    c2.download_button("Télécharger", data=file_content, file_name=f, key=f"dl_{f}")
-                except Exception:
-                    c2.error("Erreur")
+    st.markdown('<div class="fixed-upload-button">', unsafe_allow_html=True)
+    with st.popover("Charger 🔗"):
+        uploaded_files = st.file_uploader(
+            "Fichiers",
+            type=["pdf", "csv", "xlsx"],
+            accept_multiple_files=True,
+            label_visibility="collapsed"
+        )
+        if uploaded_files and st.button("Traiter"):
+            files_to_send = [
+                ("files", (f.name, f.getvalue(), f.type))
+                for f in uploaded_files
+            ]
+            with st.spinner("Traitement en cours..."):
+                requests.post(f"{API_BASE_URL}/upload/{st.session_state.session_id}", files=files_to_send)
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
