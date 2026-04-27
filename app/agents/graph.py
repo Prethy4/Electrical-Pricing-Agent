@@ -25,31 +25,22 @@ SESSION ID: {session_id}
 LANGUAGE DIRECTIVE:
 - Respond in French by default. Only switch to English if explicitly requested.
 
-CORE MISSION:
-Identify and fill missing technical values (Price, Quantity, Unit) in the CSV or Excel detail lines (terminal articles). 
-ALWAYS verify the actual filenames in the current session using the provided tools before making any assumptions about file availability or names.
-
-ERROR HANDLING:
-If you encounter a reading error, do not simply report an "encoding" issue. Use `list_session_files` to confirm the file exists and try reading it again.
-
 STRICT CONSTRAINTS (CRITICAL):
-1. NO NEW COLUMNS: Do NOT ever create new columns (like _source, _confidence). ONLY update existing columns provided in the 'columns' list.
-2. NO PLACEHOLDERS: Never fill fields with 'noos', 'None', 'nan', '***', or any fictitious data. If info is not found, leave the field blank and skip the update for that cell.
-3. ROW SELECTION: Focus on terminal articles (codes with 3 or 4 segments like '72.22.01' or '06.22.1x.01'). NEVER update general document metadata (Chantier, Client).
-4. VISUAL PRESERVATION: Excel formatting (colors, images, and fonts) is preserved during updates. Use `manage_csv_data` (action='update') confidently.
+1. NO OVERWRITING: NEVER replace existing non-empty data.
+2. ZERO TOLERANCE FOR OMISSIONS: You must process EVERY article. If 'missing_fields_to_fix' contains 50 items, you must address all 50. Do not stop until the count of missing fields is 0.
+3. ARTICLE IDENTIFICATION: Articles have 1 to 4 segments (e.g., 0, 1.1, 1.1.1, 1.1.1.1). PRIORITIZE level 4 articles, as they contain the primary technical data tables.
+4. DATA POSITIONING: If an article is in the PDF but missing from the Excel/CSV, use `manage_csv_data` (action='insert') to add it in the exact serial place relative to existing article numbers.
+5. CONFIDENCE: Only add values if you are at least 75 percent confident.
 
-RECOVERY STRATEGY:
-1. INITIAL EXPLORATION: You MUST always start by calling `list_session_files` to verify exactly which CSV, Excel, and PDF files are available in the current session. NEVER guess or assume filenames.
-2. GLOBAL AUDIT: Call `manage_csv_data` (action='read') with the correct CSV or Excel filename discovered in step 1 to get the `missing_fields_to_fix` list.
-2. RECONCILIATION:
-   - Cross-check the articles in `missing_fields_to_fix` against the articles found in `list_all_pdf_articles`.
-   - For every article with missing technical values, use `lookup_article_data` to get specific info.
-   - If not found, use `search_uploaded_documents`.
-   - Bundle ALL findings into a SINGLE call to `manage_csv_data` (action='update').
-
-AUTONOMY & TRANSPARENCY:
-- Do not stop after one article. Aim to complete the entire file.
-- ALWAYS explain which articles and values you found in the chat before calling the update tool.
+RECONCILIATION WORKFLOW:
+1. Call `list_session_files` to identify the targets.
+2. Call `manage_csv_data(action='read')` to identify gaps (`missing_fields_to_fix`).
+3. Call `list_all_pdf_articles` to see what should be in the file.
+4. For each gap or missing article: Use `lookup_article_data` (PDF search) OR `tavily_search` (Web search).
+5. Update the file using `manage_csv_data`:
+   - Use `action='update'` for existing rows with gaps.
+   - Use `action='insert'` for articles present in PDF but missing from Excel.
+6. If a lookup fails, explain WHY (e.g., "Article 1.2 not found in PDF article list").
 
 UPDATE FORMAT:
 When calling `manage_csv_data` (action='update'), use:
@@ -76,7 +67,7 @@ def build_agent_graph(retriever=None, session_id: str = "unknown"):
         model=settings.openai_model,
         openai_api_key=settings.openai_api_key,
         temperature=0.0,
-        streaming=False,
+        streaming=True,
     ).bind_tools(tools)
 
     def agent_node(state: AgentState) -> AgentState:
