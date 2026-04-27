@@ -1,7 +1,8 @@
 import sys
 import os
 from pathlib import Path
-import ast
+import json
+import asyncio
 
 # Add the project root to the Python path so we can import app modules
 project_root = str(Path(__file__).parent.parent.parent)
@@ -12,7 +13,7 @@ from app.tools.csv_tool import manage_csv_data, list_session_files
 from app.tools.pdf_tool import manage_pdf_data
 from app.core.config import get_settings
 
-def run_analysis(session_id: str):
+async def run_analysis(session_id: str):
     settings = get_settings()
     print(f"\n{'='*60}")
     print(f"ANALYZING DATA PROCESSING FOR SESSION: {session_id}")
@@ -45,10 +46,8 @@ def run_analysis(session_id: str):
             print("\n[2. FRENCH DATA VALIDATION]:")
             if "Error" not in output:
                 try:
-                    # Extract the dict part of the string
-                    data_str = output.split(f"CSV metadata for {filename}: ")[1]
-                    # Use ast.literal_eval to safely parse the Python dictionary string
-                    data = ast.literal_eval(data_str)
+                    # Parse the JSON string directly
+                    data = json.loads(output)
                     print(f" [+] Column Count: {len(data['columns'])} (If this is 1, the separator ';' was likely missed)")
                     print(f" [+] Accented Character Check: ", end="")
                     accented_cols = [c for c in data['columns'] if any(ord(char) > 127 for char in c)]
@@ -57,7 +56,7 @@ def run_analysis(session_id: str):
                     print(" [!] Could not parse summary for detailed validation.")
 
         elif filename.lower().endswith('.pdf'):
-            output = manage_pdf_data(session_id, filename)
+            output = await manage_pdf_data(session_id, filename)
             print(f"\n[1. RAW AGENT CONTEXT (What the LLM sees)]:")
             print("-" * 60)
             print(output)
@@ -66,13 +65,12 @@ def run_analysis(session_id: str):
             print("\n[2. FRENCH PDF VALIDATION]:")
             if "Error" not in output:
                 try:
-                    data_str = output.split(f"PDF metadata for {filename}: ")[1]
-                    data = ast.literal_eval(data_str)
-                    content = data.get('full_content_text', '').lower()
+                    data = json.loads(output)
+                    # Basic check for processing results
                     # Basic check for French language markers
                     fr_markers = [' le ', ' la ', ' les ', ' est ', ' dans ', ' pour ']
-                    found = [m.strip() for m in fr_markers if m in f" {content} "]
-                    print(f" [+] French language markers found: {found}" if found else " [!] No standard French markers found in sample.")
+                    print(f" [+] Extraction Method: {data.get('extraction_method')}")
+                    print(f" [+] Chunk Count: {data.get('chunk_count')}")
                 except:
                     print(" [!] Could not parse PDF summary for validation.")
         else:
@@ -84,4 +82,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         target_session = sys.argv[1]
         
-    run_analysis(target_session)
+    asyncio.run(run_analysis(target_session))
