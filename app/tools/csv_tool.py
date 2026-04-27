@@ -9,20 +9,21 @@ import shutil
 from openpyxl import load_workbook
 from typing import List, Dict, Any, Optional, Tuple
 from app.core.config import get_settings
-from app.services.article_parser import extract_article_code
+from app.services.article_parser import extract_article_code, get_hierarchy_level
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
 # Keywords used to identify the primary article/code column
-ARTICLE_KEYWORDS = ["article", "code", "réf", "n°", "art.", "item"]
+ARTICLE_KEYWORDS = ["article", "code", "réf", "n°", "art.", "item", "n. index", "articles", "related names"]
+TECH_KEYWORDS = ["qt", "p.u", "somme", "prix", "unit", "montant", "total", "qte", "quantité", "ht", "tva", "u", "pu", "unite"]
 
 def normalize_number(x: Any) -> Optional[float]:
     """Normalize numeric strings by handling French currency and decimal separators."""
     if x is None or x == "" or (isinstance(x, str) and x.lower() == "nan"):
         return None
     
-    # Clean string: remove currency symbols and whitespace
+    # Clean string: remove currency symbols and f8fafcspace
     s = str(x).strip()
     s = re.sub(r'[€$£%]', '', s)
     s = re.sub(r'\s+', '', s)
@@ -49,6 +50,11 @@ def normalize_number(x: Any) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
+def is_val_missing(val: Any) -> bool:
+    """Comprehensive check for empty, zero, or placeholder values."""
+    s = str(val).strip().lower()
+    return not s or s in ["nan", "none", "0", "0.0", "0,00", "0.00", "0,00 €", "-", "/", "null"]
+
 def list_session_files(session_id: str) -> List[str]:
     """
     Lists all files available in the upload directory for a specific session.
@@ -59,24 +65,19 @@ def list_session_files(session_id: str) -> List[str]:
     
     return [f.name for f in session_dir.iterdir() if f.is_file()]
 
-def find_header_row(file_path: Path, encoding: str, sep: str) -> int:
-    """Locates the index of the header row by looking for French technical keywords."""
-    try:
-        with open(file_path, 'r', encoding=encoding, errors='replace') as f:
-            for i, line in enumerate(f):
-                lower_line = line.lower()
-                # Check for standard BOQ headers
-                if "article" in lower_line and ("dénomination" in lower_line or "désignation" in lower_line or "unité" in lower_line):
-                    return i
-    except Exception:
-        pass
-    return 0
+def is_header_row(values: List[Any]) -> bool:
+    """Universal check for a header row based on keywords."""
+    vals = [str(v).lower() for v in values if v is not None]
+    has_art = any(k in vals for k in ARTICLE_KEYWORDS) or any(k in " ".join(vals) for k in ["n. index", "art."])
+    has_tech = any(k in " ".join(vals) for k in TECH_KEYWORDS)
+    return has_art and has_tech
 
 def manage_csv_data(session_id: str, filename: str, action: str = "read", updates: Optional[List[Dict[str, Any]]] = None) -> str:
     """
     Manages CSV data.
-    Action 'read': returns structure and missing field info.
-    Action 'update': applies found information to the file.
+    - 'read': returns structure and missing field info.
+    - 'update': fills missing fields in existing rows (NEVER overwrites existing data).
+    - 'insert': adds new rows at a specific index to maintain serial order.
     """
     base_dir = Path(settings.upload_dir) / session_id
     is_excel = filename.lower().endswith('.xlsx')
@@ -103,10 +104,7 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
             header_check = pd.read_excel(file_path, nrows=20, header=None, engine='openpyxl')
             header_idx = 0
             for i, row in header_check.iterrows():
-                row_vals = [str(v).strip().lower() for v in row.values if v is not None]
-                # Identify the row containing "Article" and technical headers
-                if any(k in row_vals for k in ["article", "art.", "code", "réf"]) and \
-                   any(k in " ".join(row_vals) for k in ["dénomination", "désignation", "unité", "qté", "quantité", "p.u", "somme"]):
+                if is_header_row(row.values):
                     header_idx = i
                     break
             
@@ -133,10 +131,55 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
                 sep = ';' if ';' in open(file_path, 'r', encoding='utf-8', errors='replace').read(1024) else ','
 
             # Header detection: identify metadata rows to preserve design
-            header_idx = find_header_row(file_path, encoding, sep)
+            header_idx = 0
+            with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                for i, line in enumerate(f):
+                    if is_header_row(line.split(sep)):
+                        header_idx = i
+                        break
             
             # Load CSV starting from the detected header row
             df = pd.read_csv(file_path, encoding=encoding, sep=sep, engine='python', dtype=str, header=header_idx)
+
+        if action == "insert" and updates:
+            # 'updates' contains objects with 'row' (insertion index) and 'data' (dict)
+            new_filename = filename if filename.startswith("updated_") else f"updated_{filename}"
+            new_file_path = file_path.parent / new_filename
+            
+            if is_excel:
+                if file_path != new_file_path:
+                    shutil.copy2(file_path, new_file_path)
+                wb = load_workbook(new_file_path)
+                ws = wb.active
+                # Map column names to indices
+                col_map = {col: i + 1 for i, col in enumerate(df.columns)}
+                
+                # Sort updates by row descending to prevent index shift during insertion
+                for upd in sorted(updates, key=lambda x: int(x['row']), reverse=True):
+                    idx = int(upd['row']) + header_idx + 2
+                    ws.insert_rows(idx)
+                    for col_name, val in upd.get('data', {}).items():
+                        if col_name in col_map:
+                            ws.cell(row=idx, column=col_map[col_name]).value = val
+                wb.save(new_file_path)
+                
+                return json.dumps({"status": "success", "message": f"Successfully inserted {len(updates)} rows into {new_filename}."})
+
+            else:
+                # CSV Insertion logic
+                for upd in sorted(updates, key=lambda x: int(x['row']), reverse=True):
+                    idx = int(upd['row'])
+                    new_row = pd.Series(upd.get('data', {}))
+                    df = pd.concat([df.iloc[:idx], new_row.to_frame().T, df.iloc[idx:]]).reset_index(drop=True)
+                
+                with open(new_file_path, 'w', encoding=encoding, newline='') as f:
+                    source_for_headers = file_path
+                    with open(source_for_headers, 'r', encoding=encoding, errors='replace') as old_f:
+                        for _ in range(header_idx):
+                            f.write(old_f.readline())
+                    
+                    df.to_csv(f, index=False, encoding=encoding, sep=sep, quoting=csv.QUOTE_MINIMAL, na_rep="")
+                return json.dumps({"status": "success", "message": f"Inserted {len(updates)} rows into CSV {filename}"})
 
         if action == "update" and updates:
             # Apply updates provided by the LLM
@@ -179,6 +222,12 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
                     continue
 
                 if row_idx < len(df):
+                    # NO OVERWRITE PROTECTION: Check if current cell is already filled
+                    existing_val = df.at[row_idx, col_name]
+                    if not is_val_missing(existing_val):
+                        logger.info(f"PROTECTION | Row {row_idx}, Col {col_name} already has value. Skipping.")
+                        continue
+
                     # Safety: Skip metadata rows or chapter titles
                     if article_col:
                         row_val = str(df.at[row_idx, article_col]).strip()
@@ -202,7 +251,7 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
 
             if is_excel:
                 wb.save(new_file_path)
-                return json.dumps({"status": "success", "message": f"Updated {len(updates)} fields in Excel {filename} (formatting preserved)"})
+                return json.dumps({"status": "success", "message": f"Successfully updated {len(updates)} fields in {new_filename}."})
             else:
                 # Standard CSV save logic
                 with open(new_file_path, 'w', encoding=encoding, newline='') as f:
@@ -214,21 +263,14 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
                         for _ in range(header_idx):
                             f.write(old_f.readline())
                     df.to_csv(f, index=False, encoding=encoding, sep=sep, quoting=csv.QUOTE_MINIMAL, na_rep="", float_format='%.10g')
-                return json.dumps({"status": "success", "message": f"Updated {len(updates)} fields in CSV {filename}"})
+                return json.dumps({"status": "success", "message": f"Successfully updated {len(updates)} fields in CSV {new_filename}."})
             
         # Global Missing Field Detection
         # Identifies terminal articles (3+ segments) with empty technical columns
         missing_audit = []
         article_col = next((c for c in df.columns if any(k in str(c).lower() for k in ARTICLE_KEYWORDS)), None)
-        # Expanded keywords and removed 'unnamed' restriction to catch columns in merged Excel headers
-        tech_keywords = ["qt", "p.u", "somme", "prix", "unit", "montant", "total", "qte", "quantité", "ht", "tva"]
-        tech_cols = [c for c in df.columns if any(k in str(c).lower() for k in tech_keywords)]
+        tech_cols = [c for c in df.columns if any(k in str(c).lower() for k in TECH_KEYWORDS)]
         
-        def is_val_missing(val):
-            s = str(val).strip().lower()
-            # More comprehensive check for empty or zero values in financial documents
-            return not s or s in ["nan", "none", "0", "0.0", "0,00", "0.00", "0,00 €", "0.00 €", "0,00€", "-", "/", "none"]
-
         if article_col:
             for idx, row in df.iterrows():
                 art_val = str(row[article_col]).strip()
@@ -240,11 +282,17 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
                 if code and not is_doc_metadata and not is_final_total:
                     missing_in_row = [c for c in tech_cols if is_val_missing(row[c])]
                     if missing_in_row:
-                        missing_audit.append({"row": idx, "article": art_val, "missing_columns": missing_in_row})
+                        missing_audit.append({
+                            "row": idx, 
+                            "article": art_val, 
+                            "code": code,
+                            "level": get_hierarchy_level(code),
+                            "missing_columns": missing_in_row
+                        })
 
         # Return all columns so LLM can see 'Unnamed' columns that might contain data
         valid_columns = list(df.columns)
-        sample_data = df.head(50).to_dict(orient="records")
+        sample_data = df.head(5).to_dict(orient="records") # Reduced from 50 to 5 to save tokens
 
         summary = {
             "status": "success",
@@ -254,7 +302,8 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
             "missing_fields_to_fix": missing_audit, # Full list of all missing fields in the entire file
             "sample_data": sample_data,
             "instruction": (
-                "1. Iterate through 'missing_fields_to_fix' completely. "
+                "CRITICAL: You must iterate through EVERY single item in 'missing_fields_to_fix'. "
+                "Do not skip any articles. Process them in order. "
                 "2. Use the 'row' index provided. "
                 "3. Cross-reference with 'list_all_pdf_articles' to find PDF articles not in the CSV."
             )
