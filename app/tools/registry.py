@@ -13,6 +13,7 @@ from langchain_core.tools import create_retriever_tool, tool
 from app.tools.web_scraper import scrape_knowledge_base, tavily_search
 from app.tools.csv_tool import manage_csv_data, list_session_files
 from app.tools.example_tool import summarize_numbers
+from app.services.article_parser import normalize_article_code
 from app.services.file_service import get_article_data, _article_stores
 from uuid import UUID
 
@@ -42,9 +43,11 @@ def lookup_article_data(session_id: str, article_code: str) -> str:
     Perform a deterministic lookup of a specific article code in the uploaded PDFs.
     Returns text and table data associated specifically with that code.
     """
-    data = get_article_data(UUID(session_id), article_code)
+    # On normalise le code reçu (de l'Excel ou de l'IA) pour correspondre à l'index PDF
+    normalized_code = normalize_article_code(article_code)
+    data = get_article_data(UUID(session_id), normalized_code)
     if not data:
-        return f"Code article '{article_code}' non trouvé dans l'index déterministe."
+        return f"Code article '{article_code}' (normalisé: {normalized_code}) non trouvé dans l'index déterministe."
     
     output = [f"--- DONNÉES POUR L'ARTICLE {article_code} ---"]
     if data.get("context"):
