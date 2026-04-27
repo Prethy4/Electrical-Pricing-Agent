@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.repositories import MessageRepository
 
 
-MAX_HISTORY_MESSAGES = 40  # max messages to load into context per turn
+MAX_HISTORY_MESSAGES = 10  # Reduced from 40 to stay within TPM limits (30k)
 
 
 async def load_session_memory(
