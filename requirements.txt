@@ -45,3 +45,4 @@ soupsieve>=2.8.3
 #Streamlit UI
 streamlit
 playwright
+test
