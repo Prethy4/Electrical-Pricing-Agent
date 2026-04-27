@@ -9,6 +9,7 @@ Replace FAISS with pgvector or another store when scaling out.
 import io
 import os
 import logging
+import asyncio
 from pathlib import Path
 import pandas as pd
 from typing import List, Tuple
@@ -72,12 +73,12 @@ async def process_pdf(
         logger.info(f"Attempting OCR for scanned PDF: {filename}")
         if convert_from_path and pytesseract:
             try:
-                # Convert PDF pages to images
-                images = convert_from_path(file_path)
+                # Offload blocking PDF conversion to a thread
+                images = await asyncio.to_thread(convert_from_path, file_path)
                 ocr_text = []
                 for img in images:
-                    # Extract text using Tesseract (using French/English)
-                    text = pytesseract.image_to_string(img, lang='fra+eng')
+                    # Offload blocking OCR to a thread
+                    text = await asyncio.to_thread(pytesseract.image_to_string, img, lang='fra+eng')
                     ocr_text.append(text)
                 full_text = "\n\n".join(ocr_text)
                 
@@ -143,7 +144,7 @@ async def process_csv(
             
     try:
         # Use engine='python' and sep=None for automatic delimiter detection
-        df = pd.read_csv(file_path, encoding=encoding, sep=None, engine='python')
+        df = await asyncio.to_thread(pd.read_csv, file_path, encoding=encoding, sep=None, engine='python')
     except Exception as e:
         logger.error(f"CSV_INDEXING_ERROR | {filename}: {e}")
         return 0
@@ -206,7 +207,7 @@ async def process_xlsx(
     logger.info(f"EXCEL_HIERARCHICAL_INGESTION_START | File: {filename}")
     try:
         # Match header detection logic from csv_tool
-        header_check = pd.read_excel(file_path, nrows=20, header=None, engine='openpyxl')
+        header_check = await asyncio.to_thread(pd.read_excel, file_path, nrows=20, header=None, engine='openpyxl')
         header_idx = 0
         for i, row in header_check.iterrows():
             row_vals = [str(v).strip().lower() for v in row.values if v is not None]
@@ -215,7 +216,7 @@ async def process_xlsx(
                 header_idx = i
                 break
         
-        df = pd.read_excel(file_path, engine='openpyxl', header=header_idx)
+        df = await asyncio.to_thread(pd.read_excel, file_path, engine='openpyxl', header=header_idx)
     except ImportError:
         logger.error(f"EXCEL_INDEXING_ERROR | {filename}: The 'openpyxl' library is required to process Excel files.")
         return 0
