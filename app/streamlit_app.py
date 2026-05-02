@@ -99,6 +99,9 @@ if "session_id" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "upload_success" not in st.session_state:
+    st.session_state.upload_success = False
+
 # ===== Functions =====
 def load_history(sid):
     resp = requests.get(f"{API_BASE_URL}/sessions/{sid}")
@@ -171,6 +174,10 @@ else:
                     st.download_button(f"Enregistrer {f}", data=file_content, file_name=f, key=f"dl_main_{f}")
 
 # ===== CHAT INPUT =====
+if st.session_state.upload_success:
+    st.success("Fichiers chargés avec succès !")
+    st.session_state.upload_success = False
+
 if prompt := st.chat_input("Ex: 'Remplir les valeurs manquantes dans mon Excel'"):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
@@ -192,6 +199,7 @@ if prompt := st.chat_input("Ex: 'Remplir les valeurs manquantes dans mon Excel'"
             if resp.status_code == 200:
                 data = resp.json()
                 ai_content = data["message"]["content"]
+                st.session_state.session_id = data["session_id"]
 
                 response_placeholder.markdown(ai_content)
                 st.session_state.messages.append({
@@ -220,6 +228,8 @@ if st.session_state.session_id:
                 for f in uploaded_files
             ]
             with st.spinner("Traitement en cours..."):
-                requests.post(f"{API_BASE_URL}/upload/{st.session_state.session_id}", files=files_to_send)
+                resp = requests.post(f"{API_BASE_URL}/upload/{st.session_state.session_id}", files=files_to_send)
+                if resp.status_code == 200:
+                    st.session_state.upload_success = True
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)

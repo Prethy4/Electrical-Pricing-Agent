@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Keywords used to identify the primary article/code column
 ARTICLE_KEYWORDS = ["article", "code", "réf", "n°", "art.", "item", "n. index", "articles", "related names"]
-TECH_KEYWORDS = ["qt", "p.u", "somme", "prix", "unit", "montant", "total", "qte", "quantité", "ht", "tva", "u", "pu", "unite"]
+TECH_KEYWORDS = ["qt", "p.u", "somme", "prix", "unit", "montant", "total", "qte", "quantité", "ht", "tva", "u", "pu", "unite", "valeur", "taux", "coefficient", "poids", "dimension", "nbr"]
 
 def normalize_number(x: Any) -> Optional[float]:
     """Normalize numeric strings by handling French currency and decimal separators."""
@@ -268,8 +268,9 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
         # Global Missing Field Detection
         # Identifies terminal articles (3+ segments) with empty technical columns
         missing_audit = []
-        article_col = next((c for c in df.columns if any(k in str(c).lower() for k in ARTICLE_KEYWORDS)), None)
-        tech_cols = [c for c in df.columns if any(k in str(c).lower() for k in TECH_KEYWORDS)]
+        article_col = next((c for c in df.columns if any(k in str(c).lower() for k in ARTICLE_KEYWORDS)), None) or (df.columns[0] if not df.empty else None)
+        # Scan all columns that are not the primary article/description column for missing values
+        tech_cols = [c for c in df.columns if c != article_col and not any(k in str(c).lower() for k in ["designation", "description", "libelle"])]
         
         if article_col:
             for idx, row in df.iterrows():
@@ -293,9 +294,13 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
         # Return all columns so LLM can see 'Unnamed' columns that might contain data
         valid_columns = list(df.columns)
         sample_data = df.head(5).to_dict(orient="records") # Reduced from 50 to 5 to save tokens
+        
+        status_msg = "success"
+        if len(df) == 0:
+            status_msg = "empty_file_headers_only"
 
         summary = {
-            "status": "success",
+            "status": status_msg,
             "current_file": current_filename,
             "columns": valid_columns,
             "row_count": len(df),
