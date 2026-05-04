@@ -159,8 +159,8 @@ if not st.session_state.session_id:
     """, unsafe_allow_html=True)
 else:
     for message in st.session_state.messages:
-        with st.chat_message(message["role"]): # type: ignore
-            st.markdown(message["content"]) # type: ignore
+        with st.chat_message(message["role"]): 
+            st.markdown(message["content"]) 
 
     # Display Download Buttons at the bottom if results are ready
     list_resp = requests.get(f"{API_BASE_URL}/list/{st.session_state.session_id}")
