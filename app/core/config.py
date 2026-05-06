@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
 
     # File Upload
-    max_file_size_mb: int = 20
+    max_file_size_mb: int = 1000
     upload_dir: str = "uploads"
     
     # RAG Settings
