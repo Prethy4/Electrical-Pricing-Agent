@@ -141,7 +141,7 @@ files=<pdf/csv/xlsx file>
 files=<another file>
 ```
 Supported formats: `.pdf`, `.csv`, `.xlsx`  
-Default max size: 20 MB (configurable via `MAX_FILE_SIZE_MB`)
+Default max size: 1000 MB (configurable via `MAX_FILE_SIZE_MB`)
 
 After uploading, all subsequent messages in the session can reference the file contents — the agent will automatically use `search_uploaded_documents` when relevant.
 
@@ -211,6 +211,6 @@ The UI connects to the FastAPI backend at `http://localhost:8000` by default. Yo
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
 | `DATABASE_URL` | — | Async PostgreSQL URL (`postgresql+asyncpg://...`) |
 | `DATABASE_URL_SYNC` | — | Sync URL for Alembic (`postgresql://...`) |
-| `MAX_FILE_SIZE_MB` | `20` | Upload size limit |
+| `MAX_FILE_SIZE_MB` | `1000` | Upload size limit |
 | `UPLOAD_DIR` | `uploads` | Local path to store uploaded files |
 | `DEBUG` | `true` | Enable SQLAlchemy query logging |test

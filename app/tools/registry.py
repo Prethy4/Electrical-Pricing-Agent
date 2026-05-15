@@ -14,6 +14,7 @@ from app.tools.web_scraper import scrape_knowledge_base, tavily_search
 from app.tools.csv_tool import manage_csv_data, list_session_files
 from app.tools.example_tool import summarize_numbers
 from app.services.article_parser import normalize_article_code
+from app.tools.playwright_tool import scrape_authenticated_website
 from app.services.file_service import get_article_data, _article_stores
 from uuid import UUID
 
@@ -89,7 +90,8 @@ REGISTERED_TOOLS = [
     list_session_files,
     summarize_numbers,
     lookup_article_data,
-    list_all_pdf_articles
+    list_all_pdf_articles,
+    scrape_authenticated_website
 ]
 
 
