@@ -304,10 +304,11 @@ def manage_csv_data(session_id: str, filename: str, action: str = "read", update
             "current_file": current_filename,
             "columns": valid_columns,
             "row_count": len(df),
-            "missing_fields_to_fix": missing_audit, # Full list of all missing fields in the entire file
+            "missing_fields_to_fix": missing_audit[:10], 
+            "total_remaining_missing": len(missing_audit),
             "sample_data": sample_data,
             "instruction": (
-                "CRITICAL: You must iterate through EVERY single item in 'missing_fields_to_fix'. "
+                "CRITICAL: Process the first 10 items in 'missing_fields_to_fix'. "
                 "Do not skip any articles. Process them in order. "
                 "2. Use the 'row' index provided. "
                 "3. Cross-reference with 'list_all_pdf_articles' to find PDF articles not in the CSV."
